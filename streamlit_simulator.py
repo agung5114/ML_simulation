@@ -26,8 +26,8 @@ def load_clf_data(dataset_name):
     if dataset_name == "Iris":
         data = load_iris()
     else:
-        data = load_breast_cancer()
-    return pd.DataFrame(data.data, columns=data.feature_names), data.target
+        data = load_wine()
+    return pd.DataFrame(data.data, columns=data.feature_names), data.target, data.target_names
 
 @st.cache_data
 def load_reg_data(dataset_name):
@@ -35,7 +35,7 @@ def load_reg_data(dataset_name):
         data = load_diabetes()
     else:
         data = fetch_california_housing()
-    return pd.DataFrame(data.data, columns=data.feature_names), data.target
+    return pd.DataFrame(data.data, columns=data.feature_names), data.target, None
 
 @st.cache_data
 def load_clu_data(dataset_name):
@@ -43,7 +43,7 @@ def load_clu_data(dataset_name):
         data = load_iris()
     else:
         data = load_wine()
-    return pd.DataFrame(data.data, columns=data.feature_names), data.target
+    return pd.DataFrame(data.data, columns=data.feature_names), data.target, data.target_names
 
 def plot_decision_boundary(df_X, y, model, top_2_names, title="Decision Boundary"):
     """Creates a plotly figure with a contour plot for the decision boundary on the top 2 features."""
@@ -101,11 +101,18 @@ if task == "Classification":
         if 'clf_results' in st.session_state:
             del st.session_state['clf_results']
             
-    df_X, y = load_clf_data(dataset_name)
+    df_X, y, target_names = load_clf_data(dataset_name)
     
     st.subheader("Data Overview & Descriptive Statistics")
-    st.dataframe(df_X.head(), use_container_width=True)
-    st.dataframe(df_X.describe(), use_container_width=True)
+    
+    # Gabungkan Target ke dalam df_preview untuk ditampilkan
+    df_preview = df_X.copy()
+    df_preview['Target_Value'] = y
+    if target_names is not None:
+        df_preview['Target_Label'] = [target_names[val] for val in y]
+        
+    st.dataframe(df_preview.head(), use_container_width=True)
+    st.dataframe(df_preview.describe(), use_container_width=True)
     
     # Train and split on ALL features
     X_train, X_test, y_train, y_test = train_test_split(df_X.values, y, test_size=0.2, random_state=42)
@@ -197,7 +204,8 @@ if task == "Classification":
                     prob = loaded_clf.predict_proba(new_data)[0] if hasattr(loaded_clf, 'predict_proba') else None
                     
                     st.success(f"**Model Used:** {selected_model_name}")
-                    st.write(f"**Prediction:** Class {prediction}")
+                    label_pred = target_names[prediction] if target_names is not None else prediction
+                    st.write(f"**Prediction:** {label_pred.upper()} (Class {prediction})")
                     if prob is not None:
                         st.write(f"**Confidence:** {prob[prediction]*100:.2f}%")
                 else:
@@ -221,11 +229,16 @@ elif task == "Regression":
         if 'reg_results' in st.session_state:
             del st.session_state['reg_results']
             
-    df_X, y = load_reg_data(dataset_name)
+    df_X, y, _ = load_reg_data(dataset_name)
     
     st.subheader("Data Overview & Descriptive Statistics")
-    st.dataframe(df_X.head(), use_container_width=True)
-    st.dataframe(df_X.describe(), use_container_width=True)
+    
+    # Gabungkan Target ke dalam df_preview untuk ditampilkan
+    df_preview = df_X.copy()
+    df_preview['Target_Value'] = y
+    
+    st.dataframe(df_preview.head(), use_container_width=True)
+    st.dataframe(df_preview.describe(), use_container_width=True)
     
     # Train and split on ALL features
     X_train, X_test, y_train, y_test = train_test_split(df_X.values, y, test_size=0.2, random_state=42)
@@ -342,11 +355,18 @@ elif task == "Clustering":
         if 'clu_results' in st.session_state:
             del st.session_state['clu_results']
             
-    df_X, _ = load_clu_data(dataset_name)
+    df_X, y, target_names = load_clu_data(dataset_name)
     
     st.subheader("Data Overview & Descriptive Statistics")
-    st.dataframe(df_X.head(), use_container_width=True)
-    st.dataframe(df_X.describe(), use_container_width=True)
+    
+    # Gabungkan Target aktual ke dalam df_preview (hanya untuk konteks pemahaman)
+    df_preview = df_X.copy()
+    df_preview['Actual_Target (Hidden)'] = y
+    if target_names is not None:
+        df_preview['Actual_Label (Hidden)'] = [target_names[val] for val in y]
+        
+    st.dataframe(df_preview.head(), use_container_width=True)
+    st.dataframe(df_preview.describe(), use_container_width=True)
     
     st.subheader("Train & Compare Models")
     k_value = st.slider("Select Number of Clusters (K)", min_value=2, max_value=6, value=3)
