@@ -36,17 +36,23 @@ def load_clu_data():
     data = load_iris()
     return pd.DataFrame(data.data, columns=data.feature_names), data.target
 
-def plot_decision_boundary(X, y, model, title="Classification Decision Boundary", xlabel="Feature 1", ylabel="Feature 2"):
-    """Creates a plotly figure with a contour plot for the decision boundary."""
-    # Define grid bounds
-    x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
-    y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
-    h = 0.1 # grid step size
+def plot_decision_boundary(df_X, y, model, top_2_names, title="Decision Boundary"):
+    """Creates a plotly figure with a contour plot for the decision boundary on the top 2 features."""
+    idx0 = df_X.columns.get_loc(top_2_names[0])
+    idx1 = df_X.columns.get_loc(top_2_names[1])
+    
+    x_min, x_max = df_X.iloc[:, idx0].min() - 1, df_X.iloc[:, idx0].max() + 1
+    y_min, y_max = df_X.iloc[:, idx1].min() - 1, df_X.iloc[:, idx1].max() + 1
+    h = (x_max - x_min) / 100.0 # grid step size
     
     xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
     
-    # Predict over grid
-    Z = model.predict(np.c_[xx.ravel(), yy.ravel()])
+    # Predict over grid by filling other features with their means
+    grid = np.tile(df_X.mean().values, (len(xx.ravel()), 1))
+    grid[:, idx0] = xx.ravel()
+    grid[:, idx1] = yy.ravel()
+    
+    Z = model.predict(grid)
     Z = Z.reshape(xx.shape)
     
     fig = go.Figure()
@@ -54,11 +60,11 @@ def plot_decision_boundary(X, y, model, title="Classification Decision Boundary"
     fig.add_trace(go.Contour(x=np.arange(x_min, x_max, h), y=np.arange(y_min, y_max, h), z=Z, 
                              showscale=False, colorscale='RdBu', opacity=0.3))
     # Add scatter for data points
-    fig.add_trace(go.Scatter(x=X[:, 0], y=X[:, 1], mode='markers',
+    fig.add_trace(go.Scatter(x=df_X.iloc[:, idx0], y=df_X.iloc[:, idx1], mode='markers',
                              marker=dict(color=y, colorscale='RdBu', line=dict(width=1, color='black')),
                              showlegend=False))
     
-    fig.update_layout(title=title, xaxis_title=xlabel, yaxis_title=ylabel, height=500)
+    fig.update_layout(title=title, xaxis_title=top_2_names[0], yaxis_title=top_2_names[1], height=500)
     return fig
 
 st.title("🤖 ML End-to-End Pipeline Simulator")
@@ -84,33 +90,14 @@ if task == "Classification":
     st.dataframe(df_X.head(), use_container_width=True)
     st.dataframe(df_X.describe(), use_container_width=True)
     
-    st.subheader("Feature Importance Rank")
-    # Extract Top 5 features using Random Forest on full dataset
-    rf_explainer = RandomForestClassifier(n_estimators=50, random_state=42)
-    rf_explainer.fit(df_X, y)
-    importances = pd.Series(rf_explainer.feature_importances_, index=df_X.columns)
-    top_5_features = importances.nlargest(5)
-    
-    fig_imp = px.bar(top_5_features, orientation='v', 
-                     title="Top 5 Most Important Features",
-                     labels={'value': 'Importance Score', 'index': 'Feature Name'},
-                     color=top_5_features.values, color_continuous_scale='viridis')
-    fig_imp.update_layout(showlegend=False)
-    st.plotly_chart(fig_imp, use_container_width=True)
-    
-    st.info(f"**Interpretation:** The vertical bar chart above displays the Top 5 most dominant features used by the algorithm to classify breast cancer. **'{top_5_features.index[0]}'** is the strongest indicator. For our 2D visual simulation below, we will train our models specifically on the top 2 features: **{top_5_features.index[0]}** and **{top_5_features.index[1]}**.")
-    
-    # Use only the top 2 features for visualization purposes
-    top_2_names = top_5_features.index[:2].tolist()
-    X = df_X[top_2_names].values
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # Train and split on ALL features
+    X_train, X_test, y_train, y_test = train_test_split(df_X.values, y, test_size=0.2, random_state=42)
     
     st.subheader("Train & Compare Models")
     if st.button("Train Models", type="primary"):
         models = {
             "Random Forest": RandomForestClassifier(n_estimators=10, random_state=42),
-            "Logistic Regression": LogisticRegression(random_state=42),
+            "Logistic Regression": LogisticRegression(max_iter=5000, random_state=42),
             "SVM (Linear)": SVC(kernel='linear', probability=True, random_state=42)
         }
         results = []
@@ -130,12 +117,39 @@ if task == "Classification":
             joblib.dump(clf, os.path.join(MODEL_DIR, f"clf_{name.replace(' ', '_')}.joblib"))
         
         st.session_state['clf_results'] = pd.DataFrame(results)
-        st.success("Models trained, evaluated, and saved successfully!")
+        st.success("Models trained on ALL features, evaluated, and saved successfully!")
         
     if 'clf_results' in st.session_state:
         # Menyorot skor terbaik (hijau) di dalam tabel metrik
         st.dataframe(st.session_state['clf_results'].style.highlight_max(subset=['Accuracy', 'F1-Score'], color='lightgreen'), use_container_width=True)
         
+    st.markdown("---")
+    st.subheader("Feature Importance Rank")
+    
+    # Dropdown for selecting ranking algorithm
+    rank_algo_clf = st.selectbox("Select Algorithm to Rank Features:", ["Random Forest", "Logistic Regression (Coefficients)"])
+    
+    if rank_algo_clf == "Random Forest":
+        explainer = RandomForestClassifier(n_estimators=50, random_state=42).fit(df_X.values, y)
+        importances = pd.Series(explainer.feature_importances_, index=df_X.columns)
+        algo_desc = "Random Forest uses decision splits (Gini impurity) to calculate importance."
+    else:
+        explainer = LogisticRegression(max_iter=5000, random_state=42).fit(df_X.values, y)
+        importances = pd.Series(np.abs(explainer.coef_[0]), index=df_X.columns)
+        algo_desc = "Logistic Regression uses the absolute value of its mathematical coefficients."
+        
+    top_5_features = importances.nlargest(5)
+    
+    fig_imp = px.bar(top_5_features, orientation='v', 
+                     title=f"Top 5 Features ({rank_algo_clf})",
+                     labels={'value': 'Importance Score', 'index': 'Feature Name'},
+                     color=top_5_features.values, color_continuous_scale='viridis')
+    fig_imp.update_layout(showlegend=False)
+    st.plotly_chart(fig_imp, use_container_width=True)
+    
+    top_2_names = top_5_features.index[:2].tolist()
+    st.info(f"**Interpretation:** {algo_desc} We will use **{top_2_names[0]}** and **{top_2_names[1]}** for our 2D simulation below. (Other features will automatically be held at their average value).")
+    
     st.markdown("---")
     
     col1, col2 = st.columns([1, 1])
@@ -157,8 +171,13 @@ if task == "Classification":
                 # Load model sesuai dengan dropdown yang dipilih pengguna
                 loaded_clf = joblib.load(model_path)
                 
-                # Make prediction
-                new_data = np.array([[f1_input, f2_input]])
+                # Build full array with means for all 30 features
+                new_data = df_X.mean().values.reshape(1, -1)
+                idx0 = df_X.columns.get_loc(top_2_names[0])
+                idx1 = df_X.columns.get_loc(top_2_names[1])
+                new_data[0, idx0] = f1_input
+                new_data[0, idx1] = f2_input
+                
                 prediction = loaded_clf.predict(new_data)[0]
                 prob = loaded_clf.predict_proba(new_data)[0]
                 
@@ -174,7 +193,7 @@ if task == "Classification":
         st.markdown("---")
         st.subheader(f"Visualizing Decision Boundary ({selected_model_name})")
         loaded_clf = joblib.load(model_path)
-        fig = plot_decision_boundary(X, y, loaded_clf, title=f"Decision Boundary - {selected_model_name}", xlabel=top_2_names[0], ylabel=top_2_names[1])
+        fig = plot_decision_boundary(df_X, y, loaded_clf, top_2_names, title=f"Decision Boundary - {selected_model_name}")
         st.plotly_chart(fig, use_container_width=True)
 
 elif task == "Regression":
@@ -187,25 +206,8 @@ elif task == "Regression":
     st.dataframe(df_X.head(), use_container_width=True)
     st.dataframe(df_X.describe(), use_container_width=True)
     
-    st.subheader("Feature Importance Rank")
-    rf_explainer = RandomForestRegressor(n_estimators=50, random_state=42)
-    rf_explainer.fit(df_X, y)
-    importances = pd.Series(rf_explainer.feature_importances_, index=df_X.columns)
-    top_5_features = importances.nlargest(5)
-    
-    fig_imp = px.bar(top_5_features, orientation='v', 
-                     title="Top 5 Most Important Features",
-                     labels={'value': 'Importance Score', 'index': 'Feature Name'},
-                     color=top_5_features.values, color_continuous_scale='plasma')
-    fig_imp.update_layout(showlegend=False)
-    st.plotly_chart(fig_imp, use_container_width=True)
-    
-    st.info(f"**Interpretation:** The bar chart shows which biological features most strongly influence diabetes progression. **'{top_5_features.index[0]}'** has the highest predictive weight. For our 1D visual simulation (line of best fit) below, we will use this top feature.")
-    
-    top_1_name = top_5_features.index[0]
-    X = df_X[[top_1_name]].values
-    
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # Train and split on ALL features
+    X_train, X_test, y_train, y_test = train_test_split(df_X.values, y, test_size=0.2, random_state=42)
     
     st.subheader("Train & Compare Models")
     if st.button("Train Models", type="primary"):
@@ -228,12 +230,36 @@ elif task == "Regression":
             joblib.dump(reg, os.path.join(MODEL_DIR, f"reg_{name.replace(' ', '_')}.joblib"))
         
         st.session_state['reg_results'] = pd.DataFrame(results)
-        st.success("Models trained, evaluated, and saved successfully!")
+        st.success("Models trained on ALL features, evaluated, and saved successfully!")
         
     if 'reg_results' in st.session_state:
         # Menyorot Error terkecil (minimum) dan R2 tertinggi (maksimum)
         st.dataframe(st.session_state['reg_results'].style.highlight_min(subset=['MAE', 'MSE'], color='lightgreen').highlight_max(subset=['R-Squared'], color='lightgreen'), use_container_width=True)
 
+    st.markdown("---")
+    st.subheader("Feature Importance Rank")
+    
+    rank_algo_reg = st.selectbox("Select Algorithm to Rank Features:", ["Random Forest Regressor", "Linear Regression (Absolute Coefficients)"])
+
+    if rank_algo_reg == "Random Forest Regressor":
+        explainer = RandomForestRegressor(n_estimators=50, random_state=42).fit(df_X.values, y)
+        importances = pd.Series(explainer.feature_importances_, index=df_X.columns)
+    else:
+        explainer = LinearRegression().fit(df_X.values, y)
+        importances = pd.Series(np.abs(explainer.coef_), index=df_X.columns)
+
+    top_5_features = importances.nlargest(5)
+    
+    fig_imp = px.bar(top_5_features, orientation='v', 
+                     title=f"Top 5 Features ({rank_algo_reg})",
+                     labels={'value': 'Importance Score', 'index': 'Feature Name'},
+                     color=top_5_features.values, color_continuous_scale='plasma')
+    fig_imp.update_layout(showlegend=False)
+    st.plotly_chart(fig_imp, use_container_width=True)
+    
+    top_1_name = top_5_features.index[0]
+    st.info(f"**Interpretation:** The model relies heavily on **'{top_1_name}'**. For our 1D visual simulation below, we will adjust this feature while holding all other medical indicators at their average.")
+    
     st.markdown("---")
     
     col1, col2 = st.columns([1, 1])
@@ -251,7 +277,12 @@ elif task == "Regression":
         if predict_btn:
             if os.path.exists(model_path):
                 loaded_reg = joblib.load(model_path)
-                new_data = np.array([[x_input]])
+                
+                # Build full array with means
+                new_data = df_X.mean().values.reshape(1, -1)
+                idx0 = df_X.columns.get_loc(top_1_name)
+                new_data[0, idx0] = x_input
+                
                 prediction = loaded_reg.predict(new_data)[0]
                 
                 st.success(f"**Model Used:** {selected_model_name}")
@@ -266,12 +297,16 @@ elif task == "Regression":
         loaded_reg = joblib.load(model_path)
         fig = go.Figure()
         # Data points aktual
-        fig.add_trace(go.Scatter(x=X.flatten(), y=y, mode='markers', name='Actual Data', marker=dict(color='blue', opacity=0.5)))
+        fig.add_trace(go.Scatter(x=df_X[top_1_name], y=y, mode='markers', name='Actual Data', marker=dict(color='blue', opacity=0.5)))
         
         # Garis prediksi berdasarkan model yang dipilih
-        line_X = np.linspace(X.min(), X.max(), 100).reshape(-1, 1)
-        line_y = loaded_reg.predict(line_X)
-        fig.add_trace(go.Scatter(x=line_X.flatten(), y=line_y, mode='lines', name=f'{selected_model_name} Prediction', line=dict(color='red', width=3)))
+        line_X_values = np.linspace(df_X[top_1_name].min(), df_X[top_1_name].max(), 100)
+        grid = np.tile(df_X.mean().values, (100, 1))
+        idx0 = df_X.columns.get_loc(top_1_name)
+        grid[:, idx0] = line_X_values
+        
+        line_y = loaded_reg.predict(grid)
+        fig.add_trace(go.Scatter(x=line_X_values, y=line_y, mode='lines', name=f'{selected_model_name} Prediction', line=dict(color='red', width=3)))
             
         fig.update_layout(xaxis_title=f"{top_1_name} Feature (Standardized)", yaxis_title="Disease Progression (Target)", height=500)
         st.plotly_chart(fig, use_container_width=True)
@@ -286,23 +321,6 @@ elif task == "Clustering":
     st.dataframe(df_X.head(), use_container_width=True)
     st.dataframe(df_X.describe(), use_container_width=True)
     
-    st.subheader("Feature 'Importance' Rank (by Variance)")
-    # Calculate variance to represent feature importance in Unsupervised Learning
-    variances = df_X.var()
-    top_features = variances.sort_values(ascending=False)
-    
-    fig_imp = px.bar(top_features, orientation='v', 
-                     title="Feature Ranking by Variance (Iris has 4 features)",
-                     labels={'value': 'Variance Score', 'index': 'Feature Name'},
-                     color=top_features.values, color_continuous_scale='teal')
-    fig_imp.update_layout(showlegend=False)
-    st.plotly_chart(fig_imp, use_container_width=True)
-    
-    st.info(f"**Interpretation:** In Unsupervised Learning (like Clustering), we don't have target labels to measure 'importance' directly. Instead, we can look at data Variance (how spread out the values are). Features with high variance (like **'{top_features.index[0]}'**) will mathematically dominate distance-based algorithms like K-Means. We will use the top 2 highest variance features (**{top_features.index[0]}** and **{top_features.index[1]}**) for our 2D simulation.")
-    
-    top_2_names = top_features.index[:2].tolist()
-    X = df_X[top_2_names].values
-    
     st.subheader("Train & Compare Models")
     k_value = st.slider("Select Number of Clusters (K)", min_value=2, max_value=6, value=3)
     
@@ -313,20 +331,46 @@ elif task == "Clustering":
         }
         results = []
         for name, clu in models.items():
-            labels = clu.fit_predict(X)
+            labels = clu.fit_predict(df_X.values)
             
             # Silhouette Score untuk mengevaluasi kualitas cluster
-            sil_score = silhouette_score(X, labels)
+            sil_score = silhouette_score(df_X.values, labels)
             
             results.append({"Model": name, "Silhouette Score": sil_score})
             joblib.dump(clu, os.path.join(MODEL_DIR, f"clu_{name.replace(' ', '_')}.joblib"))
         
         st.session_state['clu_results'] = pd.DataFrame(results)
-        st.success(f"Models trained with K={k_value} clusters!")
+        st.success(f"Models trained on all features with K={k_value} clusters!")
         
     if 'clu_results' in st.session_state:
         st.dataframe(st.session_state['clu_results'].style.highlight_max(subset=['Silhouette Score'], color='lightgreen'), use_container_width=True)
 
+    st.markdown("---")
+    st.subheader("Feature Importance / Selection")
+    
+    rank_algo_clu = st.selectbox("Select Method to Rank Features:", ["Data Variance", "PCA (Principal Component 1 Loadings)"])
+
+    if rank_algo_clu == "Data Variance":
+        importances = df_X.var()
+        title_desc = "Feature Ranking by Variance"
+    else:
+        from sklearn.decomposition import PCA
+        pca = PCA(n_components=1).fit(df_X.values)
+        importances = pd.Series(np.abs(pca.components_[0]), index=df_X.columns)
+        title_desc = "Feature Ranking by PCA Loadings"
+
+    top_features = importances.sort_values(ascending=False)
+    
+    fig_imp = px.bar(top_features, orientation='v', 
+                     title=title_desc,
+                     labels={'value': 'Score', 'index': 'Feature Name'},
+                     color=top_features.values, color_continuous_scale='teal')
+    fig_imp.update_layout(showlegend=False)
+    st.plotly_chart(fig_imp, use_container_width=True)
+    
+    top_2_names = top_features.index[:2].tolist()
+    st.info(f"**Interpretation:** We will use **{top_2_names[0]}** and **{top_2_names[1]}** for our 2D simulation below.")
+    
     st.markdown("---")
     
     col1, col2 = st.columns([1, 1])
@@ -345,7 +389,14 @@ elif task == "Clustering":
         if predict_btn:
             if os.path.exists(model_path):
                 loaded_clu = joblib.load(model_path)
-                new_data = np.array([[f1_input, f2_input]])
+                
+                # Build full array with means
+                new_data = df_X.mean().values.reshape(1, -1)
+                idx0 = df_X.columns.get_loc(top_2_names[0])
+                idx1 = df_X.columns.get_loc(top_2_names[1])
+                new_data[0, idx0] = f1_input
+                new_data[0, idx1] = f2_input
+                
                 predicted_cluster = loaded_clu.predict(new_data)[0]
                 
                 st.success(f"**Model Used:** {selected_model_name}")
@@ -358,32 +409,37 @@ elif task == "Clustering":
         st.subheader(f"Visualizing Clusters ({selected_model_name})")
         
         loaded_clu = joblib.load(model_path)
-        labels = loaded_clu.predict(X)
+        labels = loaded_clu.predict(df_X.values)
         
         fig = go.Figure()
+        
+        idx0 = df_X.columns.get_loc(top_2_names[0])
+        idx1 = df_X.columns.get_loc(top_2_names[1])
         
         # Add clustered points
         n_clusters = loaded_clu.n_components if hasattr(loaded_clu, 'n_components') else loaded_clu.n_clusters
         for i in range(n_clusters):
-            cluster_points = X[labels == i]
-            fig.add_trace(go.Scatter(x=cluster_points[:, 0], y=cluster_points[:, 1], mode='markers', 
+            cluster_points = df_X.values[labels == i]
+            fig.add_trace(go.Scatter(x=cluster_points[:, idx0], y=cluster_points[:, idx1], mode='markers', 
                                      name=f'Cluster {i}', marker=dict(size=8, opacity=0.7)))
         
         # Add centroids berdasarkan API dari K-Means vs GMM
         if hasattr(loaded_clu, 'cluster_centers_'):
             centroids = loaded_clu.cluster_centers_
-            fig.add_trace(go.Scatter(x=centroids[:, 0], y=centroids[:, 1], mode='markers', name='Centroids',
+            fig.add_trace(go.Scatter(x=centroids[:, idx0], y=centroids[:, idx1], mode='markers', name='Centroids',
                                      marker=dict(color='black', symbol='x', size=15, line=dict(width=2))))
         elif hasattr(loaded_clu, 'means_'):
             centroids = loaded_clu.means_
-            fig.add_trace(go.Scatter(x=centroids[:, 0], y=centroids[:, 1], mode='markers', name='Means (Centroids)',
+            fig.add_trace(go.Scatter(x=centroids[:, idx0], y=centroids[:, idx1], mode='markers', name='Means (Centroids)',
                                      marker=dict(color='black', symbol='x', size=15, line=dict(width=2))))
         
         fig.update_layout(xaxis_title=top_2_names[0], yaxis_title=top_2_names[1], height=500)
         st.plotly_chart(fig, use_container_width=True)
     else:
         # Plot raw unlabeled data if not trained
-        fig = px.scatter(x=X[:, 0], y=X[:, 1], title="Raw Unlabeled Data (Iris dataset)")
+        idx0 = df_X.columns.get_loc(top_2_names[0])
+        idx1 = df_X.columns.get_loc(top_2_names[1])
+        fig = px.scatter(x=df_X.iloc[:, idx0], y=df_X.iloc[:, idx1], title="Raw Unlabeled Data (Iris dataset)")
         fig.update_layout(xaxis_title=top_2_names[0], yaxis_title=top_2_names[1])
         fig.update_traces(marker=dict(color='grey'))
         st.plotly_chart(fig, use_container_width=True)
