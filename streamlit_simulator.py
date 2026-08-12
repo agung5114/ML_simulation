@@ -94,7 +94,7 @@ if task == "Classification":
     st.write("Explore data, train, and compare models to predict categorical labels.")
     
     # Dataset Selection
-    dataset_name = st.selectbox("Select Dataset:", ["Breast Cancer", "Wine Dataset"])
+    dataset_name = st.selectbox("Select Dataset:", ["Iris", "Wine Dataset"])
     # Clear session state if dataset changes
     if st.session_state.get('clf_dataset') != dataset_name:
         st.session_state['clf_dataset'] = dataset_name
