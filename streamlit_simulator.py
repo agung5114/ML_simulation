@@ -186,8 +186,8 @@ if task == "Classification":
                 if os.path.exists(model_path):
                     loaded_clf = joblib.load(model_path)
                     
-                    # Build full array with means for all features
-                    new_data = df_X.mean().values.reshape(1, -1)
+                    # Build full array with means for all features (Added .copy() to make it writable)
+                    new_data = df_X.mean().values.copy().reshape(1, -1)
                     idx0 = df_X.columns.get_loc(top_2_names[0])
                     idx1 = df_X.columns.get_loc(top_2_names[1])
                     new_data[0, idx0] = f1_input
@@ -298,7 +298,8 @@ elif task == "Regression":
                 if os.path.exists(model_path):
                     loaded_reg = joblib.load(model_path)
                     
-                    new_data = df_X.mean().values.reshape(1, -1)
+                    # Added .copy() to make array writable
+                    new_data = df_X.mean().values.copy().reshape(1, -1)
                     idx0 = df_X.columns.get_loc(top_1_name)
                     new_data[0, idx0] = x_input
                     
@@ -415,7 +416,8 @@ elif task == "Clustering":
                 if os.path.exists(model_path):
                     loaded_clu = joblib.load(model_path)
                     
-                    new_data = df_X.mean().values.reshape(1, -1)
+                    # Added .copy() to make array writable
+                    new_data = df_X.mean().values.copy().reshape(1, -1)
                     idx0 = df_X.columns.get_loc(top_2_names[0])
                     idx1 = df_X.columns.get_loc(top_2_names[1])
                     new_data[0, idx0] = f1_input
