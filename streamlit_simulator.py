@@ -5,7 +5,7 @@ import os
 import joblib
 import plotly.graph_objects as go
 import plotly.express as px
-from sklearn.datasets import load_breast_cancer, load_diabetes, load_iris, load_wine, fetch_california_housing
+from sklearn.datasets import load_breast_cancer, load_diabetes, load_iris, load_wine, fetch_california_housing, load_titanic
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge
 from sklearn.svm import SVC
@@ -23,10 +23,10 @@ if not os.path.exists(MODEL_DIR):
 
 @st.cache_data
 def load_clf_data(dataset_name):
-    if dataset_name == "Breast Cancer":
-        data = load_breast_cancer()
+    if dataset_name == "Titanic":
+        data = load_titanic()
     else:
-        data = load_wine()
+        data = load_breast_cancer()
     return pd.DataFrame(data.data, columns=data.feature_names), data.target
 
 @st.cache_data
